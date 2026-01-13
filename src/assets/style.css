@@ -100,6 +100,11 @@ tbody tr th {
   }
 }
 
+/* header 全域 */
+nav.header {
+  box-shadow: 8px 4px 8px ;
+}
+
 /* ====  產品頁面 ==== */
 
 img {
@@ -157,6 +162,14 @@ img {
 /* 內容文字 */
 .content-text{
   font-size: 0.7rem;
+}
+
+.confirm-window{
+  width: 400px;
+  height: 240px;
+  box-shadow: 10px 10ox 10px;
+  border-radius: 16px;
+  background-color: aliceblue;
 }
 
 @media (min-width: 768px){

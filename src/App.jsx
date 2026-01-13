@@ -11,14 +11,16 @@ const API_PATH = import.meta.env.VITE_API_PATH;
 
 const loginUrl = `${API_BASE}/admin/signin`; // 登入，post
 const checkLoginUrl = `${API_BASE}/api/user/check`; // 確認是否登入，post
-const getProductsUrl = `${API_BASE}/api/${API_PATH}/products/all`;  // 取得產品列表
+const getProductsUrl = `${API_BASE}/api/${API_PATH}/admin/products/all`;  // 取得產品列表(管理者)
 const postProductsUrl = `${API_BASE}/api/${API_PATH}/admin/product`;// 新增產品資料
-// 更新產品資料 因為需要 id ，故寫再函室內
+// 更新產品、刪除： 因為需要 id ，故寫再函室內
 
 
 
 
-// vv ===== ⚙️狀態管理、 🅕 函式 ==== vv
+// vv ===== 狀態邏輯區 ==== vv
+// 符號說明： ⚙️ 狀態管理、 🅕 函式、 ✡️ 打 api、 🔍 狀態檢查、⭐ 重要 
+
 function App() {
 
   // ⚙️ 1. 表單資訊初始化
@@ -55,6 +57,40 @@ function App() {
 
   };
 
+  // 🔍 2-2. 應用程式初始化的時候，檢查 Cookie 是否有 Token
+  useEffect(() => {
+    setIsForbiddenOperate(true)
+    const token = document.cookie.replace(
+      // 1. 嘗試從 Cookie 中取得 Token (使用 Regex 抓取 hexToken)
+      /(?:(?:^|.*;\s*)hexToken\s*\=\s*([^;]*).*$)|^.*$/,
+        "$1",
+    );
+
+      // 如果 Token 存在，代表使用者之前登入過
+      if (token){
+        // 把 token 設定回 axios 的預設 header， 這樣 getProduct 才能執行
+        axios.defaults.headers.common['Authorization'] = token;
+
+        // 將登入狀態域設為已登入
+        setIsAuth(true);
+
+        // 檢查 token 是否仍有效無過期
+        axios.post(checkLoginUrl)
+          .then((res) => {
+            // 有回應表示有效，順便重新讀取產品列表
+            getProducts();
+            setIsForbiddenOperate(false)
+          })
+          .catch((err) => {
+            setIsForbiddenOperate(false)
+            // 如果 token 過期就踢回首頁
+            setIsAuth(false)
+            
+          })
+      }
+   },[]); // 空陣列代表只在「元件掛載完成」時執行一次
+
+
   // 🅕 3. 取得使用者輸入值(處理多個  input 欄位，有name屬性的)
       // # 資料流：使用者輸入 A > 偵測到 INPUT 改變，觸發 onChange 事件 > 呼叫此函數
       // ##      >  e.target 解構並提取輸入值 > 下達更新指令 setFormData
@@ -70,7 +106,7 @@ function App() {
     })) // 用函式取值
   };
   
-  // 🅕 4. 按下送出後，觸發登入 API，同時觸發取得產品 api
+  // 🅕✡️ 4. 按下送出後，觸發登入 API，同時觸發取得產品 api
       // ## 成功的話，會觸發 setIsAuth 將登入狀態改為 true
   const onSubmit = async (e) => {
     try {
@@ -115,7 +151,7 @@ function App() {
     }
   };
 
-  // 🅕 5. 執行【是否已登入】驗證 ( 搭配轉圈圈)
+  // 🅕✡️ 5. 執行【是否已登入】驗證 ( 搭配轉圈圈)
   const checkLogin = async (e) => {
 
     // 使用者一點擊後，馬上啟動 setIsCheckLoading (會跳驗證中的轉圈圈)
@@ -157,26 +193,37 @@ function App() {
   // ⚙️ 7. 使用者選擇的產品詳細資訊
   const [tempProduct, setTempProduct] = useState(); // 一開始預設沒有選到產品
 
-   // 🅕 7-1. 清空狀態 (讓產品詳細資訊彈跳視窗消失)
+  // 🅕 7-1. 清空狀態 (讓產品詳細資訊彈跳視窗消失)
   const closeModal = () => {
     setTempProduct(null)
   }
 
-  // 🅕 8. 取得產品列表
+  // 🅕✡️ 8. 取得產品列表(管理者 all) ⭐⭐
   const getProducts = async () => {
+    //setIsProductLoading(true)
+    setIsForbiddenOperate(true)
     try {
       const response = await axios.get(getProductsUrl);
 
-      // 定義新資料以免覆蓋
-      const originalProducts = response.data.products
+      // 定義新資料以免覆蓋 
+        // 此時的產品是物件(客戶端才是陣列)
+      let originalProducts = response.data.products
+
+      // 使用 Object.values() 把物件的值取出來變成陣列
+      // 加上 || {} 是為了防止 API 回傳 null 時報錯
+      originalProducts = Object.values(originalProducts || {})
 
       // 將資料依照類別排序 
       const sortedProduct = sortProduct(originalProducts)
       
       // 丟回去給 setProducts
       setProducts(sortedProduct)
+      //setIsProductLoading(false)
+      setIsForbiddenOperate(false)
 
     } catch (error) {
+      // setIsProductLoading(false)
+      setIsForbiddenOperate(false)
       showErrorMsg(error, "取得產品失敗")
     }
   };
@@ -203,8 +250,11 @@ function App() {
     return newSortedArray;
   };
 
+  // ⚙️ 8-2 載入產品中的轉圈圈
+  const [isProductLoading,  setIsProductLoading] = useState(false)
 
-  // 📄 21. 商品骨架 (包含商品 api 所需要的欄位)
+
+  // 📄 21. 產品骨架 (包含產品 api 所需要的欄位)
   const defaultModalState = {
     imageUrl: "",
     title: "",
@@ -214,7 +264,7 @@ function App() {
     price: "",
     description: "",
     content: "",
-    is_enabled: 0,
+    is_enabled: 1, // 預設勾選
     imagesUrl: [""]
   };
 
@@ -261,7 +311,7 @@ function App() {
     })) // 用函式取值
   };
 
-  // 25-1.處理圖片陣列
+  // 🅕 25-1.處理圖片陣列
   const handleImageChange = (e, index) => {
     const {value } = e.target
 
@@ -279,39 +329,109 @@ function App() {
     }));
   }
 
-  // 🅕 26. 點擊送出後依【新增/編輯】狀態串接 api 並傳送資料容器
+  // 🅕✡️ 26. 點擊送出後依【新增/編輯】狀態串接 api 並傳送資料容器
       // !! 因為 tempModalData 市集時更新，所以不需要傳入也可以全域取用
   const onSubmitProduct = async (e) => {
     // 阻止預設事件
     e.preventDefault();
-
-    // 1. 根據狀態決定要觸發的 api
-    if (modalType === 'create'){
-      //把 tempModalData 用【新增資料 api】 post打出去
-       const response =  await axios.post(postProductsUrl, {"data" : tempModalData})
+    
+    // 開始轉圈圈
+    setIsForbiddenOperate(true)
+    // 組成資料
       
-    } else if (modalType === 'edit')
-      //把tempModalData用【更新資料 api】 put打出去
-      productId = tempModalData.id;
-      const putProductsUrl = `${API_BASE}/api/${API_PATH}/admin/product/${productId}`; // 更新產品資料
-      const response =  await axios.put(putProductsUrl, {"data" : tempModalData})
+    try {
+      // 要先宣告 reponse 才會全域被 if statement 外讀取
+      let response;
 
-    // 2. 關閉彈跳視窗
-    setProductModalOpen(false)
+      // 根據狀態決定要觸發的 api
+      if (modalType === 'create'){
+        //把 tempModalData 用【新增資料 api】 post打出去
+        response =  await axios.post(postProductsUrl, {"data" : tempModalData})
+      } else if (modalType === 'edit') {
+        //把tempModalData用【更新資料 api】 put打出去
+        const putProductsUrl = `${API_BASE}/api/${API_PATH}/admin/product/${tempModalData.id}`; 
+        response =  await axios.put(putProductsUrl, {"data" : tempModalData})
+      }
+      
+      if (response && response.data.success){
+        // 關閉轉圈圈
+        setIsForbiddenOperate(false)
 
-    // 3. 觸發取得產品列表 api 並更新表單
-    await getProducts()
+        // 2. 關閉彈跳視窗
+        setProductModalOpen(false)
 
-    // 4. 顯示產品新增成功吐司
-    Toast.fire({
-              icon: "success",
-              title: `${modalType === 'create' ? "產品新增成功": "產品更新成功"}`,
-              position: 'bottom-top', // 'bottom-right', 'bottom-left', (預設) 'top-end', 'top-left' 
-              showConfirmButton: false, // 不需要確認按鈕
-              timer: 3000 // 3秒後自動消失
-          });
+        // 3. 觸發取得產品列表 api 並更新表單
+        await getProducts();
+
+        // 4. 顯示產品新增成功吐司
+        Toast.fire({
+                  icon: "success",
+                  title: `${modalType === 'create' ? "產品新增成功": "產品更新成功"}`,
+                  position: 'top-end', // 'bottom-right', 'bottom-left', (預設) 'top-end', 'top-left' 
+                  showConfirmButton: false, // 不需要確認按鈕
+                  timer: 3000 // 3秒後自動消失
+              });
+      }
+      
+    } catch (error) {
+      setIsForbiddenOperate(false)
+      showErrorMsg(error, `${modalType === 'create' ? "產品新增失敗": "產品更新失敗"}`)
+      throw error;
+    }
+      
 
   };
+
+  // 🅕 27.確認是否要刪除產品
+  const confirmDelete = (product) => {
+    // 把準備刪除的資料存進全域資料
+    setTempDeleteProduct(product);
+
+    // 打開確認視窗
+    setIsNeedConfirm(true);
+
+
+  };
+
+  // 🅕✡️ 27-1.執行刪除產品
+  const delProduct = async (productId) => {
+    setIsForbiddenOperate(true)
+    const delProductUrl = `${API_BASE}/api/${API_PATH}/admin/product/${productId}`
+    try {
+
+      const response = await axios.delete(delProductUrl);
+      if (response.data.success){
+        setIsForbiddenOperate(false)
+        Toast.fire({
+                  icon: "success",
+                  title: "產品刪除成功",
+                  position: 'top-end', // 'bottom-right', 'bottom-left', (預設) 'top-end', 'top-left' 
+                  showConfirmButton: false, // 不需要確認按鈕
+                  timer: 3000 // 3秒後自動消失
+              });
+
+        // 更新產品
+        await getProducts();
+
+      }
+      
+    } catch (error) {
+      setIsForbiddenOperate(false)
+      showErrorMsg(error, "刪除產品失敗")
+      throw error;
+    }
+
+  };
+
+
+  // ⚙️ 27-2.是否確認操作狀態中 (避免誤觸)
+  const [isNeedConfirm , setIsNeedConfirm ] = useState(true);
+
+  // 📄 27-3 刪除資料暫存區 (用以全域傳遞參數)
+  const [tempDeleteProduct, setTempDeleteProduct] = useState(null)
+
+  // ⚙️ 95. 是否跳出黑色全屏 (阻止使用者點擊)
+  const [isForbiddenOperate, setIsForbiddenOperate] = useState(false);
 
   // 🅕 96 錯誤訊息吐司參數
   const Toast = Swal.mixin({
@@ -379,15 +499,15 @@ function App() {
 
 
   // 🔍 -- 確認狀態是否改變 (登入狀態)
-  useEffect(() => {
-    console.log(`偵測到 isAuth 變動，最新的值是: ${isAuth}`);
-  }, [isAuth]); // 陣列裡放想監聽的變數
+  // useEffect(() => {
+  //   console.log(`偵測到 isAuth 變動，最新的值是: ${isAuth}`);
+  // }, [isAuth]); // 陣列裡放想監聽的變數
   
-  // 🔍-- 在 App Component 內找個地方放
-  useEffect(() => {
-    // 只有當 tempModalData 真的更新完成後，這裡才會觸發
-    console.log('資料已更新，最新的 tempModalData:', tempModalData);
-  }, [tempModalData]);
+  // 🔍-- r檢視更新中的資料物件(每打一個字就會觸發)
+  // useEffect(() => {
+  //   // 只有當 tempModalData 真的更新完成後，這裡才會觸發
+  //   console.log('資料已更新，最新的 tempModalData:', tempModalData);
+  // }, [tempModalData]);
  
 
   // ^^ ===== 狀態管理定義結束 ==== ^^
@@ -499,11 +619,13 @@ function App() {
               ================================= 
               */}
 
-              {/* 產品列表表格區 */}
+              {/* 產品列表表格區 */} 
               <div className="row">
                 <div className="col-12">
+                  
                
                   <h2 className="mb-3 double-text fw-bold text-dark title-text mt-5 text-center">產品列表</h2>
+
                   
                   <div className='d-flex justify-content-between align-items-center mb-3 '>
                     
@@ -519,6 +641,8 @@ function App() {
                         <span className='mobile-disable'>確認登入狀態 </span>
                         <span >ℹ️</span>
                       </button>
+
+                      {/* 登入驗證中的轉圈圈符號 */}
                       {isCheckLoading && (
                         <div className="d-flex align-items-center me-3 text-white">
                           <div className="spinner-border spinner-border-sm me-2" role="status">
@@ -529,16 +653,28 @@ function App() {
                           <span className='fs-6'>驗證中，請稍後...</span>
                         </div>
                       )}    
+
+                      {/* 產品載入中的轉圈圈符號 */}
+                      {isProductLoading && (
+                        <div className="d-flex align-items-center me-3 text-white  justify-content-center">
+                              <div className="spinner-border spinner-border-sm me-2" role="status">
+                                <span className="visually-hidden">
+                                  Loading...
+                                </span>
+                              </div>
+                              <span className='fs-6'>產品載入中，請稍後...</span>
+                        </div>
+                      )}
                     </div>
 
-                    {/* 新增商品按鈕 */}
+                    {/* 新增產品按鈕 */}
                     <button
                       className="btn btn-success  px-2 px-md-4 sub-title-text"
                       onClick={() =>
                         openProductModal('create', defaultModalState)
                       } /** 在這個產品點擊按鈕後會選擇此產品*/
                     >
-                      <span className='mobile-disable'>新增商品 </span>
+                      <span className='mobile-disable'>新增產品 </span>
                       <span >✚</span>
                     </button>
                   </div>
@@ -547,7 +683,7 @@ function App() {
                   <table className="table table-striped table-hover  ">
                     <thead className='table-success'>
                       <tr className='table-text'>
-                        <th scope="col" className='align-middle'>商品名稱</th>
+                        <th scope="col" className='align-middle'>產品名稱</th>
                         <th scope="col" className='align-middle'>類別</th>
                         <th scope="col" className='align-middle'>原價</th>
                         <th scope="col" className='align-middle'>售價</th>
@@ -562,8 +698,8 @@ function App() {
                         <tr key={product.id} className='table-text'>
                           <td className='align-middle fw-bold text-center'>{product.title}</td>
                           <td className='align-middle text-center'>{product.category}</td>
-                          <td className='align-middle text-end'>{product.origin_price} 元</td>
-                          <td className='align-middle text-end'>{product.price} 元 / {product.unit}</td>
+                          <td className='align-middle text-center'>{product.origin_price} 元</td>
+                          <td className='align-middle text-center'>{product.price} 元 / {product.unit}</td>
                           <td className={`align-middle text-center ${product.is_enabled ? 'text-success fw-bold' : 'text-danger'}`}>
                             {product.is_enabled ? "已啟用" : "未啟用"}
                           </td>
@@ -598,7 +734,7 @@ function App() {
                             <button
                               className="btn btn-danger "
                               onClick={() =>
-                                setTempProduct(product)
+                                confirmDelete(product)
                               } /** 在這個產品點擊按鈕後會選擇此產品*/
                             >
                               <span className='mobile-disable'>刪除 </span>
@@ -622,7 +758,7 @@ function App() {
               */}
 
               {tempProduct && (
-                // 灰色遮罩區，點擊等同於關閉彈跳視窗
+                // 灰色遮罩區
                 <div 
                   className="modal-backdrop"
                   onClick = {closeModal}
@@ -633,13 +769,13 @@ function App() {
                     onClick = {(e) => e.stopPropagation()} 
                   >
                     {/* 建立停止傳播，阻止事件向富元素傳遞(冒泡) */}
-                    <h2 className='fw-bold text-dark double-text mb-3 title-text text-center'>商品詳細資訊</h2>
+                    <h2 className='fw-bold text-dark double-text mb-3 title-text text-center'>產品詳細資訊</h2>
                     {tempProduct ? (
                       /** 有選到有 key id 的產品*/
                       <div className="card mb-3 ">
                         {/* 上半部區塊 */}
                         <div className="d-flex justify-content-start align-itmes-top  p-2 p-md-4 gap-3">
-                          {/* 商品主圖 */}
+                          {/* 產品主圖 */}
                           <div className="half-item ">
                             <img
                               src={tempProduct.imageUrl}
@@ -647,7 +783,7 @@ function App() {
                               alt={`${tempProduct.title}的主圖`}
                             />
                           </div>
-                          {/* 商品名稱、類別 */}
+                          {/* 產品名稱、類別 */}
                           <div className="d-flex  flex-column justify-content-start half-item">
                             <h5 className="card-title  fw-bold sub-title-text  ">
                               {tempProduct.title}
@@ -671,14 +807,14 @@ function App() {
                         </div>
                         
                         <div className="card-body " >
-                          {/* 中間-商品細節區塊 */}
-                          <p className="card-text  content-text">📌 商品描述</p>
+                          {/* 中間-產品細節區塊 */}
+                          <p className="card-text  content-text">📌 產品描述</p>
                           <p  className="card-text  card-describe content-text">{tempProduct.description}</p>
-                          <p className="card-text  content-text">🍳 商品內容</p>
+                          <p className="card-text  content-text">🍳 產品內容</p>
                           <p  className="card-text   card-describe content-text">{tempProduct.content}</p>
                           
                           { /** 更多圖片區域 */}
-                          <h5 className="mt-4 mb-4 fw-bold sub-title-text text-center">更多圖片➕</h5>
+                          <h5 className="mt-4 mb-4 fw-bold sub-title-text text-center">更多圖片</h5>
                           <div className="d-flex flex-wrap gap-3 gap-md-4 justify-content-center">
                             {tempProduct.imagesUrl
                             // 當 url 不為空字串的時候才可以進到下一關
@@ -705,7 +841,7 @@ function App() {
                       
                   ) : (
                   /** 沒選到任何產品*/
-                  <p className="text-secondary">請選擇一個商品查看</p>
+                  <p className="text-secondary">請選擇一個產品查看</p>
                   )}   {/* 有沒有選到產品的右括號 */}
                   </div>  {/** modal-content 的閉合 */}
                 </div>  /** modal-backdrop 的閉合 */
@@ -719,10 +855,10 @@ function App() {
               */}
 
               {isProductModalOpen && 
-                // 基本架構與檢視資料模式相同
+                // 基本架構與檢視資料模式相同，編輯模式下不允許點擊此處關閉
                 <div 
                   className="modal-backdrop"
-                  onClick={() => setProductModalOpen(false)}
+                  //onClick={() => setProductModalOpen(false)}
                 >
                   {/* 彈跳視窗區塊 */}
                   <div 
@@ -730,279 +866,322 @@ function App() {
                     onClick = {(e) => e.stopPropagation()} 
                   >
                   {/* 建立停止傳播，阻止事件向富元素傳遞(冒泡) */}
-                  <h2 className="text-center">
-                    {modalType === 'create' ? "新增商品" : "編輯商品"}
-                  </h2>
+                    <h2 className="text-center">
+                      {modalType === 'create' ? "新增產品" : "編輯產品"}
+                    </h2>
 
-                  {/* 【02-2-1 編輯模式】 */}
-                  <form
-                    className="edit-form form-floating"
-                    onSubmit={(e) => onSubmitProduct(e)} // 觸發送出事件
-                  >
-                    <div className="mb-3  ">
-                      <label htmlFor="title " className=' col-form-label text-left'>商品名稱</label>
-                      <input 
-                        type="text" 
-                        value= {tempModalData.title}
-                        className="form-control " 
-                        name="title" 
-                        id="title" 
-                        placeholder="填寫商品名稱，例如：花椰菜" 
-                        onChange={(e) => handleModalInputChange(e)}
-                        required
-                      />
-  
-                      
-                    </div>
-
-                    <div className="d-flex justify-content-between">
-                      <div className=" col-md-5 mb-3 ">
+                    {/* 【02-2-1 編輯模式】 */}
+                    <form
+                      className="edit-form form-floating"
+                      onSubmit={(e) => onSubmitProduct(e)} // 觸發送出事件
+                    >
+                      <div className="mb-3  ">
+                        <label htmlFor="title " className=' col-form-label text-left'>產品名稱</label>
+                        <input 
+                          type="text" 
+                          value= {tempModalData.title}
+                          className="form-control " 
+                          name="title" 
+                          id="title" 
+                          placeholder="填寫產品名稱，例如：花椰菜" 
+                          onChange={(e) => handleModalInputChange(e)}
+                          required
+                        />
     
-                          <label htmlFor="category" className='text-left'>商品類別</label>
+                        
+                      </div>
+
+                      <div className="d-flex justify-content-between">
+                        <div className=" col-md-5 mb-3 ">
+      
+                            <label htmlFor="category" className='text-left'>產品類別</label>
+                            <input 
+                              type="text" 
+                              value={tempModalData.category} 
+                              className="form-control" 
+                              name="category" 
+                              id="category" 
+                              placeholder="蔬菜類、水果類、肉類" 
+                              onChange={(e) => handleModalInputChange(e)}
+                              required
+                            />
+
+                          
+                        </div>
+
+                        <div className=" col-md-5  mb-3 ">
+                          <label htmlFor="unit">單位</label>
                           <input 
-                            type="email" 
-                            value={tempModalData.category} 
-                            className="form-control" 
-                            name="category" 
-                            id="category" 
-                            placeholder="蔬菜類、水果類、肉類" 
+                            type="text" 
+                            value={tempModalData.unit} 
+                            className="form-control " 
+                            name="unit" 
+                            id="unit" 
+                            placeholder="市場常見的計價單位" 
                             onChange={(e) => handleModalInputChange(e)}
                             required
                           />
-
-                        
+                          
+                        </div>
                       </div>
 
-                      <div className=" col-md-5  mb-3 ">
-                        <label htmlFor="unit">單位</label>
-                        <input 
-                          type="email" 
-                          value={tempModalData.unit} 
+                      <div className=" d-flex justify-content-between">
+                        <div className="  col-md-5 mb-3 ">
+                          <label htmlFor="origin_price">原價</label>
+                          <input 
+                            type="number" 
+                            value={tempModalData.origin_price} 
+                            className="form-control " 
+                            name="origin_price" 
+                            id="origin_price" 
+                            placeholder="整數價格" 
+                            onChange={(e) => handleModalInputChange(e)}
+                            required
+                          />
+                          
+                        </div>
+
+                        <div className=" col-md-5 mb-3 ">
+                          <label htmlFor="price">特價</label>
+                          <input 
+                            type="number" 
+                            value={tempModalData.price} 
+                            className="form-control " 
+                            name="price" 
+                            id="price" 
+                            placeholder="整數價格" 
+                            onChange={(e) => handleModalInputChange(e)}
+                            required
+                          />
+                          
+                        </div>
+                      </div>
+
+                      <div className="  mb-4">
+                        <label htmlFor="description">產品描述 (description)</label>
+                        <textarea 
+                          type="text" 
+                          value={tempModalData.description} 
                           className="form-control " 
-                          name="unit" 
-                          id="unit" 
-                          placeholder="市場常見的計價單位" 
+                          rows="3"
+                          name="description" 
+                          id="description" 
+                          placeholder="填寫這個產品特性總述" 
                           onChange={(e) => handleModalInputChange(e)}
                           required
                         />
                         
                       </div>
-                    </div>
-
-                    <div className=" d-flex justify-content-between">
-                      <div className="  col-md-5 mb-3 ">
-                        <label htmlFor="origin_price">原價</label>
-                        <input 
-                          type="number" 
-                          value={tempModalData.origin_price} 
+                      
+                      <div className=" mb-3 ">
+                        <label htmlFor="content">產品內容 (content)</label>
+                        <textarea 
+                          type="text" 
+                          value={tempModalData.content} 
                           className="form-control " 
-                          name="origin_price" 
-                          id="origin_price" 
-                          placeholder="整數價格" 
+                          rows="3"
+                          name="content" 
+                          id="content" 
+                          placeholder="填寫產品補充資訊" 
                           onChange={(e) => handleModalInputChange(e)}
                           required
                         />
                         
                       </div>
-
-                      <div className=" col-md-5 mb-3 ">
-                        <label htmlFor="price">特價</label>
-                        <input 
-                          type="number" 
-                          value={tempModalData.price} 
-                          className="form-control " 
-                          name="price" 
-                          id="price" 
-                          placeholder="整數價格" 
+                      
+                      <div className=" mb-4">
+                        <label htmlFor="mageUrl">主圖網址</label>
+                        <textarea 
+                          type="text" 
+                          value={tempModalData.imageUrl || undefined} 
+                          className="form-control mb-2 " 
+                          name="imageUrl" 
+                          id="imageUrl" 
+                          placeholder="貼上合法圖片網址" 
                           onChange={(e) => handleModalInputChange(e)}
-                          required
-                        />
-                        
-                      </div>
-                    </div>
-
-                    <div className="  mb-4">
-                      <label htmlFor="description">商品描述 (description)</label>
-                      <textarea 
-                        type="text" 
-                        value={tempModalData.description} 
-                        className="form-control " 
-                        rows="3"
-                        name="description" 
-                        id="description" 
-                        placeholder="填寫這個商品特性總述n" 
-                        onChange={(e) => handleModalInputChange(e)}
-                        required
-                      />
-                      
-                    </div>
-                    
-                    <div className=" mb-3 ">
-                      <label htmlFor="content">商品內容 (content)</label>
-                      <textarea 
-                        type="text" 
-                        value={tempModalData.content} 
-                        className="form-control " 
-                        rows="3"
-                        name="content" 
-                        id="content" 
-                        placeholder="填寫商品補充資訊" 
-                        onChange={(e) => handleModalInputChange(e)}
-                        required
-                      />
-                      
-                    </div>
-                    
-                    <div className=" mb-4">
-                      <label htmlFor="mageUrl">主圖網址</label>
-                      <textarea 
-                        type="text" 
-                        value={tempModalData.imageUrl || undefined} 
-                        className="form-control mb-2 " 
-                        name="imageUrl" 
-                        id="imageUrl" 
-                        placeholder="貼上合法圖片網址" 
-                        onChange={(e) => handleModalInputChange(e)}
-                        required
-                      />
-                      <img 
-                      src={tempModalData.imageUrl || undefined}  
-                      alt="主圖預覽" 
-                      className={`images {${tempModalData.imageUrl   ? "" : "d-none"}`}  />
-                      
-                    </div>
-
-                    {/* 圖片群組 */}
-                    <div className="form-row d-flex flex-wrap justify-content-between">
-
-                      <div className=" mb-3 col-5 ">
-                        <label htmlFor="image1">副圖1</label>
-                        <textarea
-                          type="text" 
-                          value={tempModalData.imagesUrl[0] || ""} //如果是 undefined 就給空字串，避免抱錯
-                          className="form-control mb-2" 
-                          name="image1" 
-                          id="image1" 
-                          placeholder="貼上合法圖片網址" 
-                          onChange={(e) => handleImageChange(e, 0)}
-                          
                         />
                         <img 
-                        src={tempModalData.imagesUrl[0] || undefined}   
-                        alt="副圖1預覽" 
-                        className={`images ${tempModalData.imagesUrl[0] ? "" : "d-none"}`}  />
+                        src={tempModalData.imageUrl || undefined}  
+                        alt="主圖預覽" 
+                        className={`images {${tempModalData.imageUrl   ? "" : "d-none"}`}  />
                         
                       </div>
 
-                      <div className=" mb-3 col-5">
-                        <label htmlFor="image2">副圖2</label>
-                        <textarea
-                          type="text" 
-                          value={tempModalData.imagesUrl[1]  || ""}
-                          className="form-control mb-2" 
-                          name="image2" 
-                          id="image2" 
-                          placeholder="貼上合法圖片網址" 
-                          onChange={(e) =>handleImageChange(e, 1)}
+                      {/* 圖片群組 */}
+                      <div className="form-row d-flex flex-wrap justify-content-between">
+
+                        <div className=" mb-3 col-5 ">
+                          <label htmlFor="image1">副圖1</label>
+                          <textarea
+                            type="text" 
+                            value={tempModalData.imagesUrl[0] || ""} //如果是 undefined 就給空字串，避免抱錯
+                            className="form-control mb-2" 
+                            name="image1" 
+                            id="image1" 
+                            placeholder="貼上合法圖片網址" 
+                            onChange={(e) => handleImageChange(e, 0)}
+                            
+                          />
+                          <img 
+                          src={tempModalData.imagesUrl[0] || undefined}   
+                          alt="副圖1預覽" 
+                          className={`images ${tempModalData.imagesUrl[0] ? "" : "d-none"}`}  />
                           
-                        />
-                        <img
-                        src={tempModalData.imagesUrl[1] || undefined}  
-                        alt="副圖2預覽" 
-                        className={`images ${tempModalData.imagesUrl[1] ? "" : "d-none"}`}  />
-                        
-                      </div>
+                        </div>
 
-                      <div className=" mb-3 col-5 ">
-                        <label htmlFor="image3">副圖3</label>
-                        <textarea
-                          type="text" 
-                          value={tempModalData.imagesUrl[2]  || ""}
-                          className="form-control mb-2" 
-                          name="image3" 
-                          id="image3" 
-                          placeholder="貼上合法圖片網址" 
-                          onChange={(e) => handleImageChange(e, 2)}
+                        <div className=" mb-3 col-5">
+                          <label htmlFor="image2">副圖2</label>
+                          <textarea
+                            type="text" 
+                            value={tempModalData.imagesUrl[1]  || ""}
+                            className="form-control mb-2" 
+                            name="image2" 
+                            id="image2" 
+                            placeholder="貼上合法圖片網址" 
+                            onChange={(e) =>handleImageChange(e, 1)}
+                            
+                          />
+                          <img
+                          src={tempModalData.imagesUrl[1] || undefined}  
+                          alt="副圖2預覽" 
+                          className={`images ${tempModalData.imagesUrl[1] ? "" : "d-none"}`}  />
                           
-                        />
-                        <img 
-                        alt="副圖3預覽" 
-                        src={tempModalData.imagesUrl[2] }  
-                        alt="副圖3預覽" 
-                        className={`images ${tempModalData.imagesUrl[2] ? "" : "d-none"}`} />
-                        
-                      </div>
+                        </div>
 
-                      <div className=" mb-3 col-5 ">
-                        <label htmlFor="image4">副圖4</label>
-                        <textarea
-                          type="text" 
-                          value={tempModalData.imagesUrl[3]  || ""}
-                          className="form-control mb-2" 
-                          name="image4" 
-                          id="image4" 
-                          placeholder="貼上合法圖片網址" 
-                          onChange={(e) => handleImageChange(e, 3)}
+                        <div className=" mb-3 col-5 ">
+                          <label htmlFor="image3">副圖3</label>
+                          <textarea
+                            type="text" 
+                            value={tempModalData.imagesUrl[2]  || ""}
+                            className="form-control mb-2" 
+                            name="image3" 
+                            id="image3" 
+                            placeholder="貼上合法圖片網址" 
+                            onChange={(e) => handleImageChange(e, 2)}
+                            
+                          />
+                          <img 
+                          alt="副圖3預覽" 
+                          src={tempModalData.imagesUrl[2] }  
+                          alt="副圖3預覽" 
+                          className={`images ${tempModalData.imagesUrl[2] ? "" : "d-none"}`} />
                           
-                        />
-                        <img 
-                        src={tempModalData.imagesUrl[3] || undefined}  
-                        alt="副圖4預覽" 
-                        className={`images ${tempModalData.imagesUrl[3] ? "" : "d-none"}`}  />
-                        
-                      </div>
+                        </div>
 
-                      <div className=" mb-3  col-5">
-                        <label htmlFor="image5">副圖5</label>
-                        <textarea
-                          type="text" 
-                          value={tempModalData.imagesUrl[4]  || ""}
-                          className="form-control mb-2" 
-                          name="image5" 
-                          id="image5" 
-                          placeholder="貼上合法圖片網址" 
-                          onChange={(e) => handleImageChange(e, 4)}
+                        <div className=" mb-3 col-5 ">
+                          <label htmlFor="image4">副圖4</label>
+                          <textarea
+                            type="text" 
+                            value={tempModalData.imagesUrl[3]  || ""}
+                            className="form-control mb-2" 
+                            name="image4" 
+                            id="image4" 
+                            placeholder="貼上合法圖片網址" 
+                            onChange={(e) => handleImageChange(e, 3)}
+                            
+                          />
+                          <img 
+                          src={tempModalData.imagesUrl[3] || undefined}  
+                          alt="副圖4預覽" 
+                          className={`images ${tempModalData.imagesUrl[3] ? "" : "d-none"}`}  />
                           
-                        />
-                        <img 
-                        src={tempModalData.imagesUrl[4] || undefined}  
-                        alt="副圖5預覽" 
-                        className={`images ${tempModalData.imagesUrl[4] ? "" : "d-none"}`} />
-                        
+                        </div>
+
+                        <div className=" mb-3  col-5">
+                          <label htmlFor="image5">副圖5</label>
+                          <textarea
+                            type="text" 
+                            value={tempModalData.imagesUrl[4]  || ""}
+                            className="form-control mb-2" 
+                            name="image5" 
+                            id="image5" 
+                            placeholder="貼上合法圖片網址" 
+                            onChange={(e) => handleImageChange(e, 4)}
+                            
+                          />
+                          <img 
+                          src={tempModalData.imagesUrl[4] || undefined}  
+                          alt="副圖5預覽" 
+                          className={`images ${tempModalData.imagesUrl[4] ? "" : "d-none"}`} />
+                          
+                        </div>
                       </div>
-                    </div>
-                    
-                    <div className="form-check mb-4">
-                      <input 
-                        type="checkbox" 
-                        checked={!!tempModalData.is_enabled}  
-                        /*(兩個驚嘆號轉成布林值才能給api用，!! 就像魔術師，把 1 變 true，把 0 變 false)*/
-                        className="form-check-input" 
-                        name="is_enabled" 
-                        id="is_enabled" 
-                        placeholder="is_enabled" 
-                        onChange={(e) => handleModalInputChange(e)}
-                      />
-                      <label htmlFor="is_enabled">是否啟用</label>
-                    </div>
-                  </form>
-
-                  {/* 【02-2-2 新增模式】 */}
-
-                    <div className="modal-footer d-flex gap-5 justify-content-center ">
-                      <button className="btn  btn-success px-md-4">確認送出</button>
-
-                      <button 
-                        className="btn btn-secondary px-md-4"
-                        onClick={() => setProductModalOpen(false)}
-                      >取消
-                      </button>
                       
-                    </div>
+                      <div className="form-check mb-4">
+                        <input 
+                          type="checkbox" 
+                          checked={!!tempModalData.is_enabled}  
+                          /*(兩個驚嘆號轉成布林值才能給api用，!! 就像魔術師，把 1 變 true，把 0 變 false)*/
+                          className="form-check-input" 
+                          name="is_enabled" 
+                          id="is_enabled" 
+                          placeholder="is_enabled" 
+                          onChange={(e) => handleModalInputChange(e)}
+                          
+                        />
+                        <label htmlFor="is_enabled">是否啟用</label>
+                      </div>
+
+                      <div className="modal-footer d-flex gap-5 justify-content-center ">
+                        <button className="btn  btn-success px-md-4">確認送出</button>
+
+                        <button 
+                          className="btn btn-secondary px-md-4"
+                          onClick={() => setProductModalOpen(false)}
+                        >取消
+                        </button>
+                        
+                      </div>
+                    </form>
                   
                   </div> {/* 編修modal彈跳視窗閉合*/}
                 </div>  /* 編修modal遮罩閉合 */
               }
+
+            {/* 刪除、新增、編輯、reload 產品中的等待遮罩 */}
+            {isForbiddenOperate && (
+              <div className="modal-backdrop">
+                <div className="d-flex align-items-center me-3 text-white">
+                  <div className="spinner-border spinner-border-sm me-2" role="status">
+                    <span className="visually-hidden">
+                      Loading...
+                    </span>
+                  </div>
+                  <span className='fs-6'>產品更新中 ，請稍後...</span>
+                </div>
+              </div>
+            )};
+
+            {/* 刪除產品確認畫面 */}
+            {isNeedConfirm &&  tempDeleteProduct &&(
+              <div className="modal-backdrop" 
+              onClick={() => setIsNeedConfirm(false)}>
+                <div className="d-flex align-items-center me-3 text-white">
+                  <div className="confirm-window">
+                    <h4 className='text-center text-dark fw-bold py-3 mt-2'>Are you sure❓</h4>
+                    <p className='text-center text-dark fw-bold'>請確認是否要刪除下列產品</p>
+                    <p className='text-center  fw-bold py-1 text-primary'>{tempDeleteProduct.title}</p>
+
+                     <div className="modal-footer d-flex gap-5 justify-content-center">
+                        <button 
+                          className="btn  btn-danger px-md-4"
+                          onClick={() => delProduct(tempDeleteProduct.id)}
+                        >確認刪除
+                        </button>
+
+                        <button 
+                          className="btn btn-secondary px-md-4"
+                          onClick={() => setIsNeedConfirm(false)}
+                        >取消
+                        </button>
+                      </div>
+                        
+                  </div>
+                </div>
+              </div>
+            )};
+
+            
               
 
             </div>  
